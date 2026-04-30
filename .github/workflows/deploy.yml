@@ -1,4 +1,5 @@
 name: Deploy IACyber to AWS
+
 on:
   push:
     branches:
@@ -8,6 +9,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -15,26 +19,33 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. Installazione Docker Compose (Binario stabile)
-            if ! command -v docker-compose &> /dev/null; then
-              echo "Installazione manuale in corso..."
+            # 1. Installazione/Riparazione Docker Compose (Binario pulito)
+            # Se il comando fallisce o è corrotto, lo riscarichiamo
+            if ! /usr/local/bin/docker-compose version &> /dev/null; then
+              echo "Installazione di Docker Compose in corso..."
               sudo curl -L "https://github.com" -o /usr/local/bin/docker-compose
               sudo chmod +x /usr/local/bin/docker-compose
               sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose || true
             fi
 
-            # 2. Gestione progetto
+            # 2. Gestione della cartella del progetto
             if [ ! -d "IACyber" ]; then
+              echo "Primo deploy: clono il repository..."
               git clone https://github.com/MoneIori/IACyber.git
             fi
             
             cd IACyber
+            
+            # 3. Sincronizzazione codice
+            echo "Sincronizzazione file da GitHub..."
             git fetch --all
             git reset --hard origin/main
             
-            # 3. Avvio (comando col trattino)
-            echo "Avvio build container..."
+            # 4. Avvio dei container (Build e Run)
+            echo "Avvio build e container (questo potrebbe richiedere minuti)..."
             sudo /usr/local/bin/docker-compose up -d --build
             
-            # 4. Verifica
+            # 5. Pulizia e verifica
+            sudo docker image prune -f
+            echo "Stato attuale dei container:"
             sudo docker ps
