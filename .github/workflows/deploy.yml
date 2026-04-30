@@ -1,13 +1,16 @@
-name: Deploy to AWS
+name: Deploy IACyber to AWS
 on:
   push:
     branches:
-      - main  # Si attiva quando fai un push sul branch main
+      - main  # Si attiva ogni volta che carichi qualcosa sul branch main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout del codice
+        uses: actions/checkout@v4
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -15,7 +18,33 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Comandi da eseguire sulla tua istanza AWS
-            # Ad esempio, se hai una cartella del progetto:
-            # cd ~/mio-progetto && git pull && docker compose up -d --build
-            docker ps  # Comando di test per vedere se si connette
+            # 1. Verifica se git è installato (di solito lo è su Amazon Linux)
+            if ! command -v git &> /dev/null; then
+              sudo yum install git -y
+            fi
+
+            # 2. Gestione della cartella del progetto
+            if [ ! -d "IACyber" ]; then
+              echo "Primo deploy: clono il repository..."
+              git clone https://github.com{{ github.repository }}.git
+              cd IACyber
+            else
+              echo "Progetto esistente: scarico gli aggiornamenti..."
+              cd IACyber
+              # Ripristina eventuali modifiche locali per evitare conflitti nel pull
+              git reset --hard origin/main
+              git pull origin main
+            fi
+
+            # 3. Avvio dei container tramite Docker Compose
+            echo "Avvio dei container..."
+            # Usiamo sudo perché l'utente ec2-user potrebbe aver bisogno di permessi elevati
+            sudo docker compose up -d --build
+
+            # 4. Pulizia automatica
+            # Rimuove le vecchie immagini "dangling" per non esaurire il disco della t2.micro
+            sudo docker image prune -f
+
+            # 5. Stato finale
+            echo "Deploy completato con successo!"
+            sudo docker ps
