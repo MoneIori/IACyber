@@ -1,14 +1,15 @@
 name: Deploy IACyber to AWS
+
 on:
   push:
     branches:
-      - main  # Si attiva ogni volta che carichi qualcosa sul branch main
+      - main  # Si attiva quando carichi sul branch main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout del codice
+      - name: Checkout codice
         uses: actions/checkout@v4
 
       - name: Deploy via SSH
@@ -18,33 +19,37 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. Verifica se git è installato (di solito lo è su Amazon Linux) boh
-            if ! command -v git &> /dev/null; then
-              sudo yum install git -y
+            # 1. Installazione Docker Compose Plugin se non presente
+            if ! docker compose version &> /dev/null; then
+              echo "Installazione Docker Compose plugin..."
+              sudo yum update -y
+              sudo yum install docker-compose-plugin -y
             fi
 
             # 2. Gestione della cartella del progetto
             if [ ! -d "IACyber" ]; then
               echo "Primo deploy: clono il repository..."
-              git clone https://github.com/MoneIori/IACyber.git
-              cd IACyber
+              git clone https://github.com
             else
-              echo "Progetto esistente: scarico gli aggiornamenti..."
-              cd IACyber
-              # Ripristina eventuali modifiche locali per evitare conflitti nel pull
-              git reset --hard origin/main
-              git pull origin main
+              echo "Aggiornamento progetto esistente..."
             fi
+            
+            # Entriamo nella cartella
+            cd IACyber
+            
+            # 3. Allineamento codice (pulisce eventuali conflitti)
+            git fetch --all
+            git reset --hard origin/main
+            git pull origin main
 
-            # 3. Avvio dei container tramite Docker Compose
-            echo "Avvio dei container..."
-            # Usiamo sudo perché l'utente ec2-user potrebbe aver bisogno di permessi elevati
+            # 4. Avvio dei container
+            echo "Building e avvio dei container..."
+            # Usiamo 'sudo docker compose' (con lo spazio, versione 2)
             sudo docker compose up -d --build
 
-            # 4. Pulizia automatica
-            # Rimuove le vecchie immagini "dangling" per non esaurire il disco della t2.micro
+            # 5. Pulizia immagini vecchie per risparmiare spazio su AWS Free Tier
             sudo docker image prune -f
 
-            # 5. Stato finale
-            echo "Deploy completato con successo!"
+            # 6. Verifica finale
+            echo "Ecco i container attivi ora:"
             sudo docker ps
