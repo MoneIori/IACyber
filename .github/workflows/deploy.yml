@@ -3,13 +3,13 @@ name: Deploy IACyber to AWS
 on:
   push:
     branches:
-      - main  # Si attiva quando carichi sul branch main
+      - main  # Si attiva al push sul branch main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout codice
+      - name: Checkout del codice
         uses: actions/checkout@v4
 
       - name: Deploy via SSH
@@ -19,37 +19,35 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. Installazione Docker Compose Plugin se non presente
+            # 1. Installazione Docker Compose V2 (specifico per Amazon Linux 2023)
             if ! docker compose version &> /dev/null; then
-              echo "Installazione Docker Compose plugin..."
-              sudo yum update -y
-              sudo yum install docker-compose-plugin -y
+              echo "Installazione Docker Compose V2 in corso..."
+              sudo dnf update -y
+              sudo dnf install docker-compose-v2 -y
             fi
 
             # 2. Gestione della cartella del progetto
             if [ ! -d "IACyber" ]; then
               echo "Primo deploy: clono il repository..."
               git clone https://github.com
-            else
-              echo "Aggiornamento progetto esistente..."
             fi
             
-            # Entriamo nella cartella
+            # Entriamo nella cartella del progetto
             cd IACyber
             
-            # 3. Allineamento codice (pulisce eventuali conflitti)
+            # 3. Allineamento con il codice di GitHub
+            echo "Sincronizzazione codice..."
             git fetch --all
             git reset --hard origin/main
-            git pull origin main
-
+            
             # 4. Avvio dei container
-            echo "Building e avvio dei container..."
-            # Usiamo 'sudo docker compose' (con lo spazio, versione 2)
+            echo "Avvio build e container..."
+            # Questo comando scaricherà le immagini e avvierà i tuoi servizi
             sudo docker compose up -d --build
 
-            # 5. Pulizia immagini vecchie per risparmiare spazio su AWS Free Tier
+            # 5. Pulizia immagini vecchie (per non finire lo spazio su disco)
             sudo docker image prune -f
 
             # 6. Verifica finale
-            echo "Ecco i container attivi ora:"
+            echo "Container attualmente in esecuzione:"
             sudo docker ps
