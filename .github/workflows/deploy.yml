@@ -18,7 +18,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. Verifica se git è installato (di solito lo è su Amazon Linux)
+            # 1. Verifica se git è installato (di solito lo è su Amazon Linux) boh
             if ! command -v git &> /dev/null; then
               sudo yum install git -y
             fi
