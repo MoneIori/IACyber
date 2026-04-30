@@ -26,7 +26,7 @@ jobs:
             # 2. Gestione della cartella del progetto
             if [ ! -d "IACyber" ]; then
               echo "Primo deploy: clono il repository..."
-              git clone https://github.com{{ github.repository }}.git
+              git clone https://github.com/MoneIori/IACyber.git
               cd IACyber
             else
               echo "Progetto esistente: scarico gli aggiornamenti..."
