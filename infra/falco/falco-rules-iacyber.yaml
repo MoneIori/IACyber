@@ -1,0 +1,139 @@
+# IACyber — Custom Falco Rules
+# Si aggiungono alle regole default di Falco
+# Deploy: DaemonSet su ogni nodo K8s/OCP del cliente
+
+- rule: Shell in container
+  desc: Detect shell execution inside a running container
+  condition: >
+    spawned_process and container
+    and shell_procs
+    and not container.image.repository in (allowed_shell_images)
+  output: >
+    Shell executed in container
+    (user=%user.name cmd=%proc.cmdline container=%container.name
+     image=%container.image.repository:%container.image.tag
+     k8s_ns=%k8s.ns.name k8s_pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, shell, MITRE_Execution]
+
+- rule: Privilege escalation via setuid
+  desc: Detect setuid binary execution that may indicate privilege escalation
+  condition: >
+    spawned_process and container
+    and proc.is_suid_exe=true
+    and not proc.name in (allowed_setuid_binaries)
+  output: >
+    Setuid binary executed in container
+    (user=%user.name binary=%proc.name container=%container.name
+     image=%container.image.repository k8s_pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [container, privilege_escalation, MITRE_PrivilegeEscalation]
+
+- rule: Container running as root
+  desc: Detect containers running processes as root
+  condition: >
+    spawned_process and container
+    and user.uid=0
+    and not container.image.repository in (allowed_root_images)
+  output: >
+    Process running as root in container
+    (cmd=%proc.cmdline container=%container.name
+     image=%container.image.repository k8s_pod=%k8s.pod.name)
+  priority: HIGH
+  tags: [container, root, CIS_Docker_4_1]
+
+- rule: Unexpected outbound connection
+  desc: Detect unexpected outbound connections from containers
+  condition: >
+    outbound and container
+    and not fd.sport in (allowed_outbound_ports)
+    and not container.image.repository in (allowed_network_images)
+  output: >
+    Unexpected outbound connection from container
+    (cmd=%proc.cmdline connection=%fd.name container=%container.name
+     image=%container.image.repository k8s_pod=%k8s.pod.name)
+  priority: HIGH
+  tags: [container, network, MITRE_CommandAndControl]
+
+- rule: Crypto mining process
+  desc: Detect known crypto mining processes in containers
+  condition: >
+    spawned_process and container
+    and proc.name in (xmrig, minerd, cpuminer, ethminer, nbminer, teamredminer)
+  output: >
+    Crypto mining process detected in container
+    (cmd=%proc.cmdline container=%container.name
+     image=%container.image.repository k8s_pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [container, cryptomining, MITRE_Impact]
+
+- rule: Write to sensitive directory
+  desc: Detect writes to /etc, /bin, /sbin, /usr/bin in containers
+  condition: >
+    open_write and container
+    and (fd.name startswith /etc/ or fd.name startswith /bin/
+         or fd.name startswith /sbin/ or fd.name startswith /usr/bin/)
+    and not proc.name in (allowed_writers)
+  output: >
+    Write to sensitive directory in container
+    (user=%user.name file=%fd.name container=%container.name
+     image=%container.image.repository k8s_pod=%k8s.pod.name)
+  priority: HIGH
+  tags: [container, filesystem, MITRE_Persistence]
+
+- rule: Kubernetes secret access
+  desc: Detect access to Kubernetes service account tokens
+  condition: >
+    open_read and container
+    and fd.name startswith /var/run/secrets/kubernetes.io/
+    and not proc.name in (allowed_k8s_clients)
+  output: >
+    Kubernetes secret accessed in container
+    (user=%user.name file=%fd.name proc=%proc.name
+     container=%container.name k8s_pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, k8s, MITRE_CredentialAccess]
+
+- rule: Reverse shell attempt
+  desc: Detect reverse shell patterns (bash/sh redirected to network socket)
+  condition: >
+    spawned_process and container
+    and shell_procs
+    and (proc.args contains "/dev/tcp/" or proc.args contains ">&" or
+         proc.args contains "bash -i")
+  output: >
+    Reverse shell attempt in container
+    (cmd=%proc.cmdline container=%container.name
+     image=%container.image.repository k8s_pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [container, reverse_shell, MITRE_Execution, MITRE_CommandAndControl]
+
+# ─── Liste di eccezioni (personalizzabili per tenant) ────────
+
+- list: allowed_shell_images
+  items: []
+
+- list: allowed_root_images
+  items: [docker.io/library/nginx, docker.io/library/redis]
+
+- list: allowed_outbound_ports
+  items: [80, 443, 8080, 8443, 5432, 6379, 9092, 9200]
+
+- list: allowed_network_images
+  items: []
+
+- list: allowed_setuid_binaries
+  items: [ping, sudo]
+
+- list: allowed_writers
+  items: [apt, apt-get, yum, dnf, apk]
+
+- list: allowed_k8s_clients
+  items: [kubectl, kubeadm, kubelet]
+
+# ─── Webhook output verso IACyber ingestion-service ──────────
+# Configurato in falco.yaml:
+# http_output:
+#   enabled: true
+#   url: http://iacyber-ingestion:8081/ingest/falco
+#   user_agent: "falco/0.38 IACyber"

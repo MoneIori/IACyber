@@ -1,0 +1,75 @@
+{
+  "realm": "iacyber",
+  "enabled": true,
+  "displayName": "IACyber",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 900,
+  "refreshTokenMaxReuse": 0,
+  "roles": {
+    "realm": [
+      { "name": "ROLE_SOC_ANALYST",  "description": "SOC Analyst — view + triage alerts" },
+      { "name": "ROLE_SOC_LEAD",     "description": "SOC Lead — manage incidents + playbooks" },
+      { "name": "ROLE_CISO",         "description": "CISO — full read + compliance reports" },
+      { "name": "ROLE_ADMIN",        "description": "Tenant Admin — full access" },
+      { "name": "ROLE_API_CLIENT",   "description": "Machine-to-machine API access" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "iacyber-angular",
+      "name": "IACyber SOC Dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:4200/*",
+        "https://app.iacyber.io/*"
+      ],
+      "webOrigins": [
+        "http://localhost:4200",
+        "https://app.iacyber.io"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "iacyber-services",
+      "name": "IACyber Spring Services (M2M)",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "iacyber-services-secret-dev"
+    }
+  ],
+  "users": [
+    {
+      "username": "soc-analyst-demo",
+      "enabled": true,
+      "email": "analyst@demo.iacyber.io",
+      "firstName": "Demo",
+      "lastName": "Analyst",
+      "credentials": [{ "type": "password", "value": "Demo1234!", "temporary": false }],
+      "realmRoles": ["ROLE_SOC_ANALYST"],
+      "attributes": {
+        "tenant_id": ["demo-tenant-001"]
+      }
+    },
+    {
+      "username": "admin-demo",
+      "enabled": true,
+      "email": "admin@demo.iacyber.io",
+      "firstName": "Demo",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "Admin1234!", "temporary": false }],
+      "realmRoles": ["ROLE_ADMIN"],
+      "attributes": {
+        "tenant_id": ["demo-tenant-001"]
+      }
+    }
+  ]
+}

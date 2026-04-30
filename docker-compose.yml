@@ -1,0 +1,358 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────
+#  IACyber — Local Development Environment
+#  Avvio: docker compose up -d
+#  Stop:  docker compose down -v
+# ─────────────────────────────────────────────────────────────
+
+networks:
+  iacyber-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  opensearch-data:
+  kafka-data:
+  redis-data:
+  keycloak-data:
+  vault-data:
+
+services:
+
+  # ─── PostgreSQL ───────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iacyber-postgres
+    environment:
+      POSTGRES_USER: iacyber
+      POSTGRES_PASSWORD: iacyber_dev
+      POSTGRES_DB: iacyber
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - iacyber-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iacyber"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: iacyber-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - iacyber-net
+    command: redis-server --requirepass iacyber_dev
+
+  # ─── Zookeeper (Kafka dependency) ─────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: iacyber-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - iacyber-net
+
+  # ─── Kafka ────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: iacyber-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - iacyber-net
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ─── Kafka UI ─────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: iacyber-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: iacyber-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - iacyber-net
+
+  # ─── OpenSearch (SIEM) ────────────────────────────────────
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: iacyber-opensearch
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      - DISABLE_SECURITY_PLUGIN=true
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks:
+      - iacyber-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ─── OpenSearch Dashboards ────────────────────────────────
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.13.0
+    container_name: iacyber-opensearch-dashboards
+    depends_on:
+      - opensearch
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    networks:
+      - iacyber-net
+
+  # ─── Keycloak (Auth) ──────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.3
+    container_name: iacyber-keycloak
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8180:8080"
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: iacyber
+      KC_DB_PASSWORD: iacyber_dev
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    command: start-dev --import-realm
+    volumes:
+      - ./infra/keycloak/realm-iacyber.json:/opt/keycloak/data/import/realm-iacyber.json
+    networks:
+      - iacyber-net
+
+  # ─── HashiCorp Vault (Secrets) ────────────────────────────
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: iacyber-vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: iacyber-dev-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault-data:/vault/data
+    networks:
+      - iacyber-net
+
+  # ─── Spring Gateway ───────────────────────────────────────
+  gateway-service:
+    build:
+      context: .                                              # root = accede al parent pom.xml
+      dockerfile: spring-services/gateway-service/Dockerfile
+    container_name: iacyber-gateway
+    depends_on:
+      - keycloak
+      - redis
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KEYCLOAK_URL: http://keycloak:8080
+      REDIS_HOST: redis
+      REDIS_PASSWORD: iacyber_dev
+    networks:
+      - iacyber-net
+    profiles:
+      - spring
+
+  # ─── Ingestion Service ────────────────────────────────────
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: spring-services/ingestion-service/Dockerfile
+    container_name: iacyber-ingestion
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/iacyber
+      POSTGRES_USER: iacyber
+      POSTGRES_PASSWORD: iacyber_dev
+    networks:
+      - iacyber-net
+    profiles:
+      - spring
+
+  # ─── SIEM Service ─────────────────────────────────────────
+  siem-service:
+    build:
+      context: .
+      dockerfile: spring-services/siem-service/Dockerfile
+    container_name: iacyber-siem
+    depends_on:
+      - opensearch
+      - kafka
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      OPENSEARCH_URL: http://opensearch:9200
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    networks:
+      - iacyber-net
+    profiles:
+      - spring
+
+  # ─── Python AI — Anomaly Detection ───────────────────────
+  anomaly-detection-api:
+    build:
+      context: ./python-ai/anomaly-detection-api
+      dockerfile: Dockerfile
+    container_name: iacyber-anomaly-api
+    ports:
+      - "9001:9001"
+    environment:
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+      LOG_LEVEL: INFO
+    networks:
+      - iacyber-net
+
+  # ─── Python AI — Threat Classifier ───────────────────────
+  threat-classifier-api:
+    build:
+      context: ./python-ai/threat-classifier-api
+      dockerfile: Dockerfile
+    container_name: iacyber-classifier-api
+    ports:
+      - "9002:9002"
+    environment:
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+    networks:
+      - iacyber-net
+
+  # ─── Python AI — Predictive CVE ───────────────────────────
+  predictive-cve-api:
+    build:
+      context: ./python-ai/predictive-cve-api
+      dockerfile: Dockerfile
+    container_name: iacyber-predictive-api
+    ports:
+      - "9003:9003"
+    environment:
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+      NVD_API_KEY: ${NVD_API_KEY:-}
+    networks:
+      - iacyber-net
+
+  # ─── Python AI — NLP Analyst ─────────────────────────────
+  nlp-analyst-api:
+    build:
+      context: ./python-ai/nlp-analyst-api
+      dockerfile: Dockerfile
+    container_name: iacyber-nlp-api
+    ports:
+      - "9004:9004"
+    environment:
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    networks:
+      - iacyber-net
+
+  # ─── Python AI — SAST AI ─────────────────────────────────
+  sast-ai-api:
+    build:
+      context: ./python-ai/sast-ai-api
+      dockerfile: Dockerfile
+    container_name: iacyber-sast-api
+    ports:
+      - "9005:9005"
+    environment:
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    networks:
+      - iacyber-net
+
+  # ─── Python AI — Container Security AI ───────────────────
+  container-ai-api:
+    build:
+      context: ./python-ai/container-ai-api
+      dockerfile: Dockerfile
+    container_name: iacyber-container-ai
+    ports:
+      - "9006:9006"
+    environment:
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    networks:
+      - iacyber-net
+
+  # ─── Spring Container Scanner ─────────────────────────────
+  container-scanner-service:
+    build:
+      context: .
+      dockerfile: spring-services/container-scanner-service/Dockerfile
+    container_name: iacyber-container-scanner
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      - container-ai-api
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/iacyber
+      POSTGRES_USER: iacyber
+      POSTGRES_PASSWORD: iacyber_dev
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CONTAINER_AI_API_URL: http://container-ai-api:9006
+      INTERNAL_TOKEN: iacyber-internal-dev-token
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # accesso al Docker locale per scan
+    networks:
+      - iacyber-net
+    profiles:
+      - spring

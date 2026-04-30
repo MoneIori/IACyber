@@ -1,0 +1,21 @@
+name: Deploy to AWS
+on:
+  push:
+    branches:
+      - main  # Si attiva quando fai un push sul branch main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Comandi da eseguire sulla tua istanza AWS
+            # Ad esempio, se hai una cartella del progetto:
+            # cd ~/mio-progetto && git pull && docker compose up -d --build
+            docker ps  # Comando di test per vedere se si connette
