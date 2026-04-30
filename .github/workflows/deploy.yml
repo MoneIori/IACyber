@@ -3,13 +3,13 @@ name: Deploy IACyber to AWS
 on:
   push:
     branches:
-      - main
+      - main  # Si attiva al push sul branch main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout del codice
         uses: actions/checkout@v4
 
       - name: Deploy via SSH
@@ -19,28 +19,35 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. Installazione manuale di Docker Compose (Binario diretto)
-            if ! command -v docker-compose &> /dev/null; then
-              echo "Installazione manuale di docker-compose..."
-              sudo curl -L "https://github.com(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              sudo chmod +x /usr/local/bin/docker-compose
-              # Crea un link simbolico per sicurezza
-              sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose || true
+            # 1. Installazione Docker Compose V2 (specifico per Amazon Linux 2023)
+            if ! docker compose version &> /dev/null; then
+              echo "Installazione Docker Compose V2 in corso..."
+              sudo dnf update -y
+              sudo dnf install docker-compose-v2 -y
             fi
 
-            # 2. Gestione cartella
+            # 2. Gestione della cartella del progetto
             if [ ! -d "IACyber" ]; then
+              echo "Primo deploy: clono il repository..."
               git clone https://github.com
             fi
             
+            # Entriamo nella cartella del progetto
             cd IACyber
+            
+            # 3. Allineamento con il codice di GitHub
+            echo "Sincronizzazione codice..."
             git fetch --all
             git reset --hard origin/main
             
-            # 3. Avvio (Usiamo il comando col trattino docker-compose)
+            # 4. Avvio dei container
             echo "Avvio build e container..."
-            sudo docker-compose up -d --build
-            
-            # 4. Cleanup e verifica
+            # Questo comando scaricherà le immagini e avvierà i tuoi servizi
+            sudo docker compose up -d --build
+
+            # 5. Pulizia immagini vecchie (per non finire lo spazio su disco)
             sudo docker image prune -f
+
+            # 6. Verifica finale
+            echo "Container attualmente in esecuzione:"
             sudo docker ps
